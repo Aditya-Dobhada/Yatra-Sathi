@@ -1,9 +1,11 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SelectBudgetOptions, SelectTravelsList } from "@/constants/options";
+import { useState } from "react";
 import GooglePlacesAutocomplete from "react-google-places-autocomplete";
 
 function CreateTrip() {
+  const [place, setPlace] = useState();
   return (
     <div className="sm:px-10 md:px-32 lg:px-56 xl:px-72 px-5 mt-10">
       <h2 className="font-bold text-3xl">
