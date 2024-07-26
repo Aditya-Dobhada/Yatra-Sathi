@@ -1,11 +1,119 @@
+import { FcGoogle } from "react-icons/fc";
+import { AiOutlineLoading3Quarters } from "react-icons/ai";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { SelectBudgetOptions, SelectTravelsList } from "@/constants/options";
+import {
+  AI_PROMPT,
+  SelectBudgetOptions,
+  SelectTravelsList,
+} from "@/constants/options";
+import { chatSession } from "@/service/AIModal";
 import { useState } from "react";
 import GooglePlacesAutocomplete from "react-google-places-autocomplete";
+import { toast } from "sonner";
+import { useGoogleLogin } from "@react-oauth/google";
+import axios from "axios";
+import { doc, setDoc } from "firebase/firestore";
+import { db } from "@/service/firebaseConfig";
+import { useNavigate } from "react-router-dom";
 
 function CreateTrip() {
   const [place, setPlace] = useState();
+
+  const [formData, setFormData] = useState([]);
+
+  const [openDialog, setOpenDialog] = useState(false);
+
+  const [loading, setLoading] = useState(false);
+
+  const navigate = useNavigate();
+
+  const handleChange = (name, value) => {
+    setFormData({
+      ...formData,
+      [name]: value,
+    });
+  };
+
+  const login = useGoogleLogin({
+    onSuccess: (codeResp) => GetUserProfile(codeResp),
+    onError: (error) => console.log(error),
+  });
+
+  const onGenerateTrip = async () => {
+    const user = localStorage.getItem("user");
+
+    if (!user) {
+      setOpenDialog(true);
+      return;
+    }
+
+    if (
+      formData?.noOfDays > 10 ||
+      formData?.noOfDays < 0 ||
+      !formData?.location ||
+      !formData?.budget ||
+      !formData?.travelers
+    ) {
+      toast("Please fill all the details");
+      return;
+    }
+
+    setLoading(true);
+
+    const FINAL_PROMPT = AI_PROMPT.replace(
+      "{location}",
+      formData?.location?.label,
+    )
+      .replace("{noOfDays}", formData?.noOfDays)
+      .replace("{travelers}", formData?.travelers)
+      .replace("{budget}", formData?.budget)
+      .replace("{noOfDays}", formData?.noOfDays);
+
+    const result = await chatSession.sendMessage(FINAL_PROMPT);
+    setLoading(false);
+    SaveAiTrip(result?.response?.text());
+  };
+
+  const SaveAiTrip = async (TripData) => {
+    setLoading(true);
+    const user = JSON.parse(localStorage.getItem("user"));
+    const docId = Date.now().toString();
+    await setDoc(doc(db, "AITrips", docId), {
+      userSelection: formData,
+      tripData: JSON.parse(TripData),
+      userEmail: user?.email,
+      id: docId,
+    });
+    setLoading(false);
+
+    navigate("/view-trip/" + docId);
+  };
+
+  const GetUserProfile = (tokenInfo) => {
+    axios
+      .get(
+        `https://www.googleapis.com/oauth2/v1/userinfo?access_token=${tokenInfo?.access_token}`,
+        {
+          headers: {
+            Authorization: `Bearer ${tokenInfo?.access_token}`,
+            Accept: "Application/json",
+          },
+        },
+      )
+      .then((resp) => {
+        localStorage.setItem("user", JSON.stringify(resp.data));
+        setOpenDialog(false);
+        onGenerateTrip();
+      });
+  };
+
   return (
     <div className="sm:px-10 md:px-32 lg:px-56 xl:px-72 px-5 mt-10">
       <h2 className="font-bold text-3xl">
@@ -26,6 +134,7 @@ function CreateTrip() {
               place,
               onChange: (value) => {
                 setPlace(value);
+                handleChange("location", value);
               },
             }}
           />
@@ -33,10 +142,14 @@ function CreateTrip() {
 
         <div>
           <h2 className="text-xl my-3 font-medium">
-            How many days are you planning to spend on your trip?
+            How many days are you planning to spend on your trip? 
           </h2>
           <div>
-            <Input placeholder={"Ex.4"} type="number" />
+            <Input
+              placeholder={"Ex.4"}
+              type="number"
+              onChange={(e) => handleChange("noOfDays", e.target.value)}
+            />
           </div>
         </div>
 
@@ -46,7 +159,8 @@ function CreateTrip() {
             {SelectBudgetOptions.map((items, index) => (
               <div
                 key={index}
-                className="p-4 border rounded-lg hover:shadow-lg cursor-pointer"
+                onClick={() => handleChange("budget", items.title)}
+                className={`p-4 border cursor-pointer rounded-lg hover:shadow-lg ${formData?.budget == items.title && "border-black shadow-lg"}`}
               >
                 <h2 className="text-4xl">{items.icon}</h2>
                 <h2 className="font-bold text-lg">{items.title}</h2>
@@ -63,7 +177,8 @@ function CreateTrip() {
               {SelectTravelsList.map((items, index) => (
                 <div
                   key={index}
-                  className="p-4 border rounded-lg hover:shadow-lg cursor-pointer"
+                  onClick={() => handleChange("travelers", items.people)}
+                  className={`p-4 border rounded-lg hover:shadow-lg cursor-pointer ${formData.travelers == items.people && "shadow-lg border-black"}`}
                 >
                   <h2 className="text-4xl">{items.icon}</h2>
                   <h2 className="flex items-center font-bold text-lg">
@@ -80,8 +195,38 @@ function CreateTrip() {
         </div>
       </div>
       <div className="my-10 justify-end flex">
-        <Button>Generate Trip</Button>
+        <Button disabled={loading} onClick={onGenerateTrip}>
+          {loading ? (
+            <AiOutlineLoading3Quarters className="h-7 w-7 animate-spin" />
+          ) : (
+            "Generate Trip"
+          )}
+        </Button>
       </div>
+
+      <Dialog open={openDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogDescription>
+              <div className="flex justify-start items-center">
+                <img src="/Logo.svg" />
+                <span className="text-black font-bold text-2xl">
+                  Yatra Sathi
+                </span>
+              </div>
+              <h2 className="font-bold text-lg mt-7">Sign In With Google</h2>
+              <p>Sign in to the App with Google Authentication securely</p>
+              <Button
+                onClick={login}
+                className="w-full mt-5 flex gap-4 items-center"
+              >
+                <FcGoogle className="h-7 w-7" />
+                Sign In with Google
+              </Button>
+            </DialogDescription>
+          </DialogHeader>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
